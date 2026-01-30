@@ -7,11 +7,11 @@ echo [*] Suppression de la persistance (Dossier Demarrage)...
 del "%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\OneDriveUpdate.exe" /F /Q
 
 echo [*] Suppression du virus dans Temp...
-del "%TEMP%\doc.exe" /F /Q
+del "%TEMP%\update.exe" /F /Q
 
 echo [*] Suppression du raccourci piege sur le Bureau...
-del "%USERPROFILE%\Desktop\Facture*.lnk" /F /Q
-del "%USERPROFILE%\Desktop\Facture*.pdf" /F /Q
+del "%USERPROFILE%\Desktop\Facture.pdf.lnk" /F /Q
+del "%USERPROFILE%\Desktop\Facture.pdf" /F /Q
 
 echo [+] Nettoyage termine.
 pause
