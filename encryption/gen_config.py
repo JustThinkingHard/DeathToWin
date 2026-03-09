@@ -1,12 +1,10 @@
 import sys
 
 def xor_string(text, key):
-    # Transforme le texte en tableau d'octets chiffrés
     output = "{"
     for char in text:
         encrypted_char = ord(char) ^ key
         output += f"0x{encrypted_char:02x}, "
-    # Ajoute le null terminator chiffré si besoin, ou gère la longueur
     output = output.rstrip(", ") + "}"
     return output
 
@@ -17,7 +15,7 @@ if __name__ == "__main__":
 
     ip = sys.argv[1]
     port = sys.argv[2]
-    KEY = 0x3B # La même clé que dans ton C++
+    KEY = 0x3B
 
     print(f"// Fichier généré automatiquement par le Makefile")
     print(f"#ifndef CONFIG_H")

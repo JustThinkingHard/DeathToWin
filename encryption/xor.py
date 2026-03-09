@@ -1,14 +1,12 @@
 def xor_string(text, key):
     output = "{"
     for char in text:
-        # On fait un XOR entre le caractère et la clé
         encrypted_char = ord(char) ^ key
         output += f"0x{encrypted_char:02x}, "
     output = output.rstrip(", ") + "}"
     return output
 
-# La clé de chiffrement (on garde la même pour tout le C++)
-KEY = 0x3B  # Clé arbitraire (';')
+KEY = 0x3B 
 
 print(f"--- Clé utilisée : 0x{KEY:02x} ---")
 print(f"// IP C2 (192.168.101.1) :")

@@ -227,8 +227,6 @@ int main() {
                     outfile << "\n\n(Don't be so harsh on yourself, everybody can make mistake)" << endl;
                     outfile.close();
                     
-                    // 4. Ouvrir le fichier via son chemin complet
-                    // NULL à la place de "open" force l'action par défaut (souvent plus fiable)
                     ShellExecuteA(NULL, NULL, filename.c_str(), NULL, NULL, SW_SHOW);
                     
                     resultat = "[+] Prank executed: Notepad opened at " + filename;
